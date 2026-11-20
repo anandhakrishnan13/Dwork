@@ -39,6 +39,7 @@ metadata it receives.
 
 ```
 .
+├── .env.example                # single shared env template for both apps
 ├── backend/
 │   ├── db/
 │   │   ├── schema.sql          # table + indexes (migration)
@@ -70,7 +71,20 @@ metadata it receives.
 │   └── types/                  # shared TypeScript types
 ```
 
-## 1. Database (Supabase)
+## 1. Environment
+
+There is one `.env` at the repository root, shared by the API and the web app.
+Create it once:
+
+```bash
+cp .env.example .env
+```
+
+Both apps load it automatically; you do not need `backend/.env` or
+`frontend/.env.local`. Environment variables already set in your shell take
+precedence over the file.
+
+## 2. Database (Supabase)
 
 1. Create a project at [supabase.com](https://supabase.com).
 2. Copy the connection string from **Project Settings → Database → Connection
@@ -112,14 +126,16 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5432/employees
 DB_SSL=false
 ```
 
-## 2. Backend
+## 3. Backend
 
 ```bash
 cd backend
 npm install
-cp .env.example .env      # fill in DATABASE_URL
 npm run dev               # http://localhost:4000
 ```
+
+The API reads the root `.env` (and still accepts normal shell environment
+variables).
 
 Environment variables:
 
@@ -133,6 +149,7 @@ Environment variables:
 | `SUPER_ADMIN_PASSWORD` | no | Super admin password (default `kaam-chor-majdoor`)      |
 | `JWT_SECRET`           | no | Token signing secret (default is development-only; set a long random value in production) |
 | `DEFAULT_EMPLOYEE_PASSWORD` | no | Password for new employee accounts (default `Majdoor-hu-mai`) |
+| `NEXT_PUBLIC_API_URL`  | no | Frontend API base URL (default `http://localhost:4000`)  |
 
 On every start the API applies the idempotent schema, then creates or refreshes
 the super admin account from these
@@ -146,17 +163,17 @@ returned by the API.
 
 Health check: `GET http://localhost:4000/health`.
 
-## 3. Frontend
+## 4. Frontend
 
 ```bash
 cd frontend
 npm install
-cp .env.example .env.local
 npm run dev               # http://localhost:3000
 ```
 
-`NEXT_PUBLIC_API_URL` must point at the API (default `http://localhost:4000`).
-The app starts on `/login`; the directory at `/` requires a valid session.
+`NEXT_PUBLIC_API_URL` from the root `.env` must point at the API (default
+`http://localhost:4000`). The app starts on `/login`; the directory at `/`
+requires a valid session.
 
 ### Role model
 
@@ -173,6 +190,7 @@ be deleted or demoted through the employee API.
 
 ```bash
 npm install               # root tooling (concurrently)
+cp .env.example .env      # one shared config file
 npm run db:schema         # apply backend/db/schema.sql to DATABASE_URL
 npm run dev               # API + web together
 npm run test              # backend integration tests

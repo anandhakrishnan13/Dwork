@@ -1,5 +1,9 @@
-import "dotenv/config";
+import { config as loadEnv } from "dotenv";
 import { z } from "zod";
+
+// Both apps read the single .env at the repository root. Explicit shell
+// variables still win because dotenv does not override existing values.
+loadEnv({ path: new URL("../../.env", import.meta.url), quiet: true });
 
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
