@@ -1,12 +1,16 @@
 import { createApp } from "./app.js";
 import { ensureEmployeeAccounts, seedSuperAdmin } from "./auth/seed.js";
 import { loadConfig } from "./config.js";
+import { applySchema } from "./db/apply-schema.js";
 import { createPool } from "./db/pool.js";
 
 const config = loadConfig();
 const pool = createPool(config.databaseUrl, config.dbSsl);
 
 try {
+  await applySchema(pool);
+  console.log("Database schema ready");
+
   await seedSuperAdmin(pool, {
     email: config.superAdminEmail,
     password: config.superAdminPassword,

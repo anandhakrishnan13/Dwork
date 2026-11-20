@@ -43,18 +43,22 @@ metadata it receives.
 │   ├── db/
 │   │   ├── schema.sql          # table + indexes (migration)
 │   │   └── seed.sql            # 13 sample employees
-│   ├── scripts/local-db.ts     # optional embedded Postgres for development
+│   ├── scripts/
+│   │   ├── apply-schema.ts      # applies db/schema.sql to DATABASE_URL
+│   │   └── local-db.ts          # optional embedded Postgres for development
 │   ├── src/
 │   │   ├── app.ts              # Express app factory (CORS, helmet, errors)
 │   │   ├── auth/               # login, JWT middleware, password seeding
 │   │   ├── config.ts           # env validation
-│   │   ├── db/pool.ts          # pg pool, SSL for Supabase
+│   │   ├── db/
+│   │   │   ├── apply-schema.ts # idempotent startup migration
+│   │   │   └── pool.ts         # pg pool, SSL for Supabase
 │   │   ├── employees/
 │   │   │   ├── repository.ts   # parameterized SQL, fixed PAGE_SIZE
 │   │   │   ├── routes.ts       # REST endpoints + role checks
 │   │   │   └── schema.ts       # Zod validation
 │   │   └── server.ts
-│   └── tests/api.test.ts       # 36 integration tests against real Postgres
+│   └── tests/                  # 37 integration tests against real Postgres
 ├── frontend/
 │   ├── app/                    # App Router pages, layout, login page
 │   ├── components/
@@ -69,13 +73,22 @@ metadata it receives.
 ## 1. Database (Supabase)
 
 1. Create a project at [supabase.com](https://supabase.com).
-2. Open **SQL Editor**, paste the contents of `backend/db/schema.sql`, and run it.
-   Optionally run `backend/db/seed.sql` for sample data.
-3. Copy the connection string from **Project Settings → Database → Connection
-   string → URI**. Prefer the **Session pooler** URI if your network needs IPv4.
-   Replace `[YOUR-PASSWORD]` with the database password.
+2. Copy the connection string from **Project Settings → Database → Connection
+   string → URI**. Prefer the **Session pooler** URI if your network needs IPv4;
+   the direct database host may be IPv6-only. The pooler username looks like
+   `postgres.<project-ref>` and uses port `5432`. Replace `[YOUR-PASSWORD]` with
+   the database password.
+3. That is it. On startup the API applies `backend/db/schema.sql` automatically
+   (it is idempotent), so a fresh database gets the `employees` and `users`
+   tables. You can also apply it yourself before starting:
 
-Using `psql` instead:
+```bash
+cd backend
+npm run db:schema
+```
+
+To add the 13 sample employees, run `backend/db/seed.sql` in the Supabase SQL
+Editor, or with `psql`:
 
 ```bash
 psql "$DATABASE_URL" -f backend/db/schema.sql
@@ -121,7 +134,8 @@ Environment variables:
 | `JWT_SECRET`           | no | Token signing secret (default is development-only; set a long random value in production) |
 | `DEFAULT_EMPLOYEE_PASSWORD` | no | Password for new employee accounts (default `Majdoor-hu-mai`) |
 
-On every start the API creates or refreshes the super admin account from these
+On every start the API applies the idempotent schema, then creates or refreshes
+the super admin account from these
 values, stores its password as a bcrypt hash, and gives any employee without a
 login an account using the default employee password. Change the credentials and
 secret before deploying.
@@ -159,6 +173,7 @@ be deleted or demoted through the employee API.
 
 ```bash
 npm install               # root tooling (concurrently)
+npm run db:schema         # apply backend/db/schema.sql to DATABASE_URL
 npm run dev               # API + web together
 npm run test              # backend integration tests
 npm run build             # typecheck + production builds
@@ -268,7 +283,9 @@ The suite boots an embedded PostgreSQL instance, applies `db/schema.sql`, and
 exercises login, JWT authentication, role-based access, hierarchy validation,
 default employee accounts, validation, pagination metadata, client-supplied limit
 rejection, search, combobox names, create/update/delete, duplicate emails, 404s
-and CORS. 36 tests run in roughly 10 seconds.
+and CORS. A separate test starts from an empty database and proves the startup
+schema migration creates both tables and can run twice. 37 tests run in roughly
+10 seconds.
 
 ## Deployment
 

@@ -10,6 +10,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import EmbeddedPostgres from "embedded-postgres";
+import { applySchema } from "../src/db/apply-schema.js";
 import { createPool } from "../src/db/pool.js";
 
 const port = Number(process.env.LOCAL_DB_PORT ?? 5432);
@@ -39,9 +40,8 @@ try {
 }
 
 const pool = createPool(connectionString, false);
-const schema = await readFile(join(process.cwd(), "db/schema.sql"), "utf8");
 const seed = await readFile(join(process.cwd(), "db/seed.sql"), "utf8");
-await pool.query(schema);
+await applySchema(pool);
 
 const { rows } = await pool.query<{ total: number }>("SELECT COUNT(*)::int AS total FROM employees");
 if ((rows[0]?.total ?? 0) === 0) {
