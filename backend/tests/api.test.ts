@@ -1,11 +1,14 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import bcrypt from "bcryptjs";
 import EmbeddedPostgres from "embedded-postgres";
 import type { Pool } from "pg";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
+import { seedSuperAdmin } from "../src/auth/seed.js";
+import { loadConfig } from "../src/config.js";
 import { createPool } from "../src/db/pool.js";
 
 const PORT = 55432;
@@ -49,7 +52,7 @@ beforeAll(async () => {
 }, 120_000);
 
 beforeEach(async () => {
-  await pool.query("TRUNCATE employees RESTART IDENTITY");
+  await pool.query("TRUNCATE employees RESTART IDENTITY CASCADE");
   await seed();
 });
 
@@ -276,5 +279,64 @@ describe("CORS", () => {
       .set("Origin", "http://localhost:3000");
 
     expect(response.headers["access-control-allow-origin"]).toBe("http://localhost:3000");
+  });
+});
+
+describe("super admin seeding", () => {
+  beforeEach(async () => {
+    await pool.query("TRUNCATE users RESTART IDENTITY CASCADE");
+  });
+
+  it("creates the super admin with a bcrypt password hash", async () => {
+    await seedSuperAdmin(pool, {
+      email: "default@example.com",
+      password: "kaam-chor-majdoor",
+    });
+
+    const { rows } = await pool.query(
+      "SELECT email, password_hash, role, is_super_admin FROM users WHERE LOWER(email) = $1",
+      ["default@example.com"],
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      email: "default@example.com",
+      role: "admin",
+      is_super_admin: true,
+    });
+    expect(rows[0].password_hash).not.toBe("kaam-chor-majdoor");
+    await expect(
+      bcrypt.compare("kaam-chor-majdoor", rows[0].password_hash),
+    ).resolves.toBe(true);
+  });
+
+  it("updates the existing super admin instead of creating a duplicate", async () => {
+    await seedSuperAdmin(pool, {
+      email: "default@example.com",
+      password: "first-password",
+    });
+    await seedSuperAdmin(pool, {
+      email: "DEFAULT@example.com",
+      password: "second-password",
+    });
+
+    const { rows } = await pool.query(
+      "SELECT password_hash FROM users WHERE LOWER(email) = $1",
+      ["default@example.com"],
+    );
+
+    expect(rows).toHaveLength(1);
+    await expect(
+      bcrypt.compare("second-password", rows[0].password_hash),
+    ).resolves.toBe(true);
+  });
+});
+
+describe("config", () => {
+  it("defaults the super admin credentials", () => {
+    const config = loadConfig({ DATABASE_URL: "postgresql://localhost/test" });
+
+    expect(config.superAdminEmail).toBe("default@example.com");
+    expect(config.superAdminPassword).toBe("kaam-chor-majdoor");
   });
 });

@@ -105,6 +105,12 @@ Environment variables:
 | `DB_SSL`       | no       | `true` for Supabase/hosted Postgres, `false` locally     |
 | `PORT`         | no       | API port (default `4000`)                                |
 | `CORS_ORIGIN`  | no       | Comma-separated allowed origins (default `http://localhost:3000`) |
+| `SUPER_ADMIN_EMAIL`    | no | Super admin login email (default `default@example.com`) |
+| `SUPER_ADMIN_PASSWORD` | no | Super admin password (default `kaam-chor-majdoor`)      |
+
+On every start the API creates or refreshes the super admin account from these
+values and stores its password as a bcrypt hash. Change both credentials before
+deploying.
 
 Health check: `GET http://localhost:4000/health`.
 

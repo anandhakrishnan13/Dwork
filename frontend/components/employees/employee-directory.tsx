@@ -3,19 +3,14 @@
 import { useEffect, useState } from "react";
 import {
   Loader2Icon,
+  PlusIcon,
   RefreshCwIcon,
   UsersIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -36,7 +31,7 @@ import type { Employee, EmployeeInput } from "@/types/employee";
 export function EmployeeDirectory() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
-  const [createKey, setCreateKey] = useState(0);
+  const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Employee | null>(null);
   const [deleting, setDeleting] = useState<Employee | null>(null);
 
@@ -62,7 +57,7 @@ export function EmployeeDirectory() {
   async function handleCreate(values: EmployeeInput) {
     const result = await create(values);
     if (result.success) {
-      setCreateKey((key) => key + 1);
+      setCreating(false);
       if (page !== 1) setPage(1);
       else await reload({ silent: true });
     }
@@ -106,77 +101,81 @@ export function EmployeeDirectory() {
             Add teammates, keep details current, and find anyone in seconds.
           </p>
         </div>
-        <Badge variant="outline" className="w-fit gap-1.5 py-1">
-          <UsersIcon className="size-3.5" />
-          {data ? employeeCount(data.totalRecords) : "Loading…"}
-        </Badge>
-      </div>
-
-      <div className="grid items-start gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
-        <Card className="lg:sticky lg:top-20">
-          <CardHeader>
-            <CardTitle>Add employee</CardTitle>
-            <CardDescription>
-              New teammates appear at the top of the list.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <EmployeeForm
-              key={createKey}
-              submitLabel="Add employee"
-              isSubmitting={pending === "create"}
-              onSubmit={handleCreate}
-            />
-          </CardContent>
-        </Card>
-
-        <div className="flex min-w-0 flex-col gap-4">
-          <div className="flex gap-2">
-            <div className="min-w-0 flex-1">
-              <EmployeeSearch value={search} onChange={handleSearchChange} />
-            </div>
-            <Button
-              variant="outline"
-              onClick={handleRefresh}
-              disabled={isRefreshing}
-              aria-label="Refresh directory"
-              className="shrink-0"
-            >
-              {isRefreshing ? (
-                <Loader2Icon className="animate-spin" />
-              ) : (
-                <RefreshCwIcon />
-              )}
-              <span className="hidden sm:inline">
-                {isRefreshing ? "Refreshing…" : "Refresh"}
-              </span>
-            </Button>
-          </div>
-
-          <Card className="gap-0 overflow-hidden py-0">
-            <EmployeeTable
-              employees={data?.data ?? []}
-              isLoading={isLoading}
-              error={error}
-              search={search}
-              pendingDeleteId={
-                pending === "delete" && deleting ? deleting.id : null
-              }
-              onEdit={setEditing}
-              onDelete={setDeleting}
-              onRetry={() => void reload()}
-              onClearSearch={() => handleSearchChange("")}
-            />
-            <PaginationControls
-              currentPage={data?.currentPage ?? page}
-              totalPages={data?.totalPages ?? 1}
-              totalRecords={data?.totalRecords ?? 0}
-              pageSize={data?.pageSize ?? 10}
-              onPageChange={setPage}
-            />
-          </Card>
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="w-fit gap-1.5 py-1">
+            <UsersIcon className="size-3.5" />
+            {data ? employeeCount(data.totalRecords) : "Loading…"}
+          </Badge>
+          <Button onClick={() => setCreating(true)}>
+            <PlusIcon />
+            Add employee
+          </Button>
         </div>
       </div>
+
+      <div className="flex min-w-0 flex-col gap-4">
+        <div className="flex gap-2">
+          <div className="min-w-0 flex-1">
+            <EmployeeSearch value={search} onChange={handleSearchChange} />
+          </div>
+          <Button
+            variant="outline"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            aria-label="Refresh directory"
+            className="shrink-0"
+          >
+            {isRefreshing ? (
+              <Loader2Icon className="animate-spin" />
+            ) : (
+              <RefreshCwIcon />
+            )}
+            <span className="hidden sm:inline">
+              {isRefreshing ? "Refreshing…" : "Refresh"}
+            </span>
+          </Button>
+        </div>
+
+        <Card className="gap-0 overflow-hidden py-0">
+          <EmployeeTable
+            employees={data?.data ?? []}
+            isLoading={isLoading}
+            error={error}
+            search={search}
+            pendingDeleteId={
+              pending === "delete" && deleting ? deleting.id : null
+            }
+            onEdit={setEditing}
+            onDelete={setDeleting}
+            onRetry={() => void reload()}
+            onClearSearch={() => handleSearchChange("")}
+          />
+          <PaginationControls
+            currentPage={data?.currentPage ?? page}
+            totalPages={data?.totalPages ?? 1}
+            totalRecords={data?.totalRecords ?? 0}
+            pageSize={data?.pageSize ?? 10}
+            onPageChange={setPage}
+          />
+        </Card>
+      </div>
+
+      <Dialog open={creating} onOpenChange={setCreating}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add employee</DialogTitle>
+            <DialogDescription>
+              Create a directory profile. New teammates appear at the top of the list.
+            </DialogDescription>
+          </DialogHeader>
+          <EmployeeForm
+            submitLabel="Add employee"
+            isSubmitting={pending === "create"}
+            onSubmit={handleCreate}
+            onCancel={() => setCreating(false)}
+          />
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={Boolean(editing)}

@@ -6,6 +6,8 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   CORS_ORIGIN: z.string().default("http://localhost:3000"),
   DB_SSL: z.enum(["true", "false"]).optional(),
+  SUPER_ADMIN_EMAIL: z.string().trim().email().default("default@example.com"),
+  SUPER_ADMIN_PASSWORD: z.string().min(8).default("kaam-chor-majdoor"),
 });
 
 export interface AppConfig {
@@ -13,6 +15,8 @@ export interface AppConfig {
   port: number;
   corsOrigins: string[];
   dbSsl: boolean;
+  superAdminEmail: string;
+  superAdminPassword: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -32,5 +36,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     port: PORT,
     corsOrigins: CORS_ORIGIN.split(",").map((origin) => origin.trim()).filter(Boolean),
     dbSsl: DB_SSL === "true",
+    superAdminEmail: parsed.data.SUPER_ADMIN_EMAIL,
+    superAdminPassword: parsed.data.SUPER_ADMIN_PASSWORD,
   };
 }

@@ -1,9 +1,23 @@
 import { createApp } from "./app.js";
+import { seedSuperAdmin } from "./auth/seed.js";
 import { loadConfig } from "./config.js";
 import { createPool } from "./db/pool.js";
 
 const config = loadConfig();
 const pool = createPool(config.databaseUrl, config.dbSsl);
+
+try {
+  await seedSuperAdmin(pool, {
+    email: config.superAdminEmail,
+    password: config.superAdminPassword,
+  });
+  console.log(`Super admin ready: ${config.superAdminEmail}`);
+} catch (error) {
+  console.error("Could not seed the super admin:", error);
+  await pool.end();
+  process.exit(1);
+}
+
 const app = createApp(pool, { corsOrigins: config.corsOrigins });
 
 const server = app.listen(config.port, () => {
