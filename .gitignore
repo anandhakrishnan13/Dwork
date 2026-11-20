@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.env.local
+.pgdata/
+coverage/
+*.log
+.DS_Store
+.next/
+out/
+.vercel/
