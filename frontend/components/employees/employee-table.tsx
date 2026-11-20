@@ -18,7 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatDate, initials } from "@/lib/format";
+import { accessRoleLabel, formatDate, initials } from "@/lib/format";
 import type { Employee } from "@/types/employee";
 
 interface EmployeeTableProps {
@@ -27,6 +27,8 @@ interface EmployeeTableProps {
   error: string | null;
   search: string;
   pendingDeleteId: number | null;
+  canEdit: (employee: Employee) => boolean;
+  canDelete: boolean;
   onEdit: (employee: Employee) => void;
   onDelete: (employee: Employee) => void;
   onRetry: () => void;
@@ -40,7 +42,9 @@ function TableSkeleton() {
         <TableRow className="hover:bg-transparent">
           <TableHead className="pl-4">Employee</TableHead>
           <TableHead className="hidden sm:table-cell">Role</TableHead>
-          <TableHead className="hidden md:table-cell">Added</TableHead>
+          <TableHead className="hidden md:table-cell">Manager</TableHead>
+          <TableHead className="hidden lg:table-cell">Access</TableHead>
+          <TableHead className="hidden xl:table-cell">Added</TableHead>
           <TableHead className="pr-4">
             <span className="sr-only">Actions</span>
           </TableHead>
@@ -62,6 +66,12 @@ function TableSkeleton() {
               <Skeleton className="h-5 w-24 rounded-full" />
             </TableCell>
             <TableCell className="hidden md:table-cell">
+              <Skeleton className="h-3.5 w-28" />
+            </TableCell>
+            <TableCell className="hidden lg:table-cell">
+              <Skeleton className="h-5 w-16 rounded-full" />
+            </TableCell>
+            <TableCell className="hidden xl:table-cell">
               <Skeleton className="h-3.5 w-20" />
             </TableCell>
             <TableCell className="pr-4">
@@ -80,6 +90,8 @@ export function EmployeeTable({
   error,
   search,
   pendingDeleteId,
+  canEdit,
+  canDelete,
   onEdit,
   onDelete,
   onRetry,
@@ -130,72 +142,96 @@ export function EmployeeTable({
     );
   }
 
+  const hasActions = canDelete || employees.some((employee) => canEdit(employee));
+
   return (
     <Table>
       <TableHeader>
         <TableRow className="hover:bg-transparent">
           <TableHead className="pl-4">Employee</TableHead>
           <TableHead className="hidden sm:table-cell">Role</TableHead>
-          <TableHead className="hidden md:table-cell">Added</TableHead>
-          <TableHead className="pr-4 text-right">
-            <span className="sr-only">Actions</span>
-          </TableHead>
+          <TableHead className="hidden md:table-cell">Manager</TableHead>
+          <TableHead className="hidden lg:table-cell">Access</TableHead>
+          <TableHead className="hidden xl:table-cell">Added</TableHead>
+          {hasActions ? (
+            <TableHead className="pr-4 text-right">
+              <span className="sr-only">Actions</span>
+            </TableHead>
+          ) : null}
         </TableRow>
       </TableHeader>
       <TableBody>
-        {employees.map((employee) => (
-          <TableRow key={employee.id}>
-            <TableCell className="pl-4">
-              <div className="flex items-center gap-3">
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
-                  {initials(employee.name)}
-                </span>
-                <div className="min-w-0">
-                  <p className="truncate font-medium">{employee.name}</p>
-                  <p className="max-w-64 truncate text-xs text-muted-foreground">
-                    {employee.email}
-                  </p>
-                  <Badge
-                    variant="secondary"
-                    className="mt-1 max-w-40 truncate sm:hidden"
-                  >
-                    {employee.role}
-                  </Badge>
+        {employees.map((employee) => {
+          const editable = canEdit(employee);
+
+          return (
+            <TableRow key={employee.id}>
+              <TableCell className="pl-4">
+                <div className="flex items-center gap-3">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
+                    {initials(employee.name)}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{employee.name}</p>
+                    <p className="max-w-64 truncate text-xs text-muted-foreground">
+                      {employee.email}
+                    </p>
+                    <Badge
+                      variant="secondary"
+                      className="mt-1 max-w-40 truncate sm:hidden"
+                    >
+                      {employee.role}
+                    </Badge>
+                  </div>
                 </div>
-              </div>
-            </TableCell>
-            <TableCell className="hidden sm:table-cell">
-              <Badge variant="secondary" className="max-w-40 truncate">
-                {employee.role}
-              </Badge>
-            </TableCell>
-            <TableCell className="hidden text-muted-foreground md:table-cell">
-              {formatDate(employee.created_at)}
-            </TableCell>
-            <TableCell className="pr-4">
-              <div className="flex justify-end gap-1">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => onEdit(employee)}
-                  aria-label={`Edit ${employee.name}`}
-                >
-                  <PencilIcon />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  onClick={() => onDelete(employee)}
-                  aria-label={`Delete ${employee.name}`}
-                  disabled={pendingDeleteId === employee.id}
-                >
-                  <Trash2Icon />
-                </Button>
-              </div>
-            </TableCell>
-          </TableRow>
-        ))}
+              </TableCell>
+              <TableCell className="hidden sm:table-cell">
+                <Badge variant="secondary" className="max-w-40 truncate">
+                  {employee.role}
+                </Badge>
+              </TableCell>
+              <TableCell className="hidden text-muted-foreground md:table-cell">
+                {employee.manager_name ?? "—"}
+              </TableCell>
+              <TableCell className="hidden lg:table-cell">
+                <Badge variant="outline">
+                  {accessRoleLabel(employee.access_role)}
+                </Badge>
+              </TableCell>
+              <TableCell className="hidden text-muted-foreground xl:table-cell">
+                {formatDate(employee.created_at)}
+              </TableCell>
+              {hasActions ? (
+                <TableCell className="pr-4">
+                  <div className="flex justify-end gap-1">
+                    {editable ? (
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => onEdit(employee)}
+                        aria-label={`Edit ${employee.name}`}
+                      >
+                        <PencilIcon />
+                      </Button>
+                    ) : null}
+                    {canDelete ? (
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        onClick={() => onDelete(employee)}
+                        aria-label={`Delete ${employee.name}`}
+                        disabled={pendingDeleteId === employee.id}
+                      >
+                        <Trash2Icon />
+                      </Button>
+                    ) : null}
+                  </div>
+                </TableCell>
+              ) : null}
+            </TableRow>
+          );
+        })}
       </TableBody>
     </Table>
   );

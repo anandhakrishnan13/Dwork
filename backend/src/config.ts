@@ -8,6 +8,8 @@ const envSchema = z.object({
   DB_SSL: z.enum(["true", "false"]).optional(),
   SUPER_ADMIN_EMAIL: z.string().trim().email().default("default@example.com"),
   SUPER_ADMIN_PASSWORD: z.string().min(8).default("kaam-chor-majdoor"),
+  JWT_SECRET: z.string().min(16).default("dev-only-change-me-in-production"),
+  DEFAULT_EMPLOYEE_PASSWORD: z.string().min(8).default("Majdoor-hu-mai"),
 });
 
 export interface AppConfig {
@@ -17,6 +19,8 @@ export interface AppConfig {
   dbSsl: boolean;
   superAdminEmail: string;
   superAdminPassword: string;
+  jwtSecret: string;
+  defaultEmployeePassword: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -38,5 +42,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     dbSsl: DB_SSL === "true",
     superAdminEmail: parsed.data.SUPER_ADMIN_EMAIL,
     superAdminPassword: parsed.data.SUPER_ADMIN_PASSWORD,
+    jwtSecret: parsed.data.JWT_SECRET,
+    defaultEmployeePassword: parsed.data.DEFAULT_EMPLOYEE_PASSWORD,
   };
 }

@@ -2,12 +2,16 @@ import cors from "cors";
 import express, { type ErrorRequestHandler } from "express";
 import helmet from "helmet";
 import type { Pool } from "pg";
+import { authenticate } from "./auth/middleware.js";
+import { authRouter } from "./auth/routes.js";
 import { EmployeeRepository } from "./employees/repository.js";
 import { employeesRouter } from "./employees/routes.js";
 import { HttpError } from "./errors.js";
 
 export interface AppOptions {
   corsOrigins: string[];
+  jwtSecret: string;
+  defaultEmployeePassword: string;
 }
 
 export function createApp(pool: Pool, options: AppOptions) {
@@ -19,7 +23,7 @@ export function createApp(pool: Pool, options: AppOptions) {
     cors({
       origin: options.corsOrigins,
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type"],
+      allowedHeaders: ["Content-Type", "Authorization"],
     }),
   );
   app.use(express.json({ limit: "100kb" }));
@@ -29,7 +33,14 @@ export function createApp(pool: Pool, options: AppOptions) {
     res.json({ status: "ok" });
   });
 
-  app.use("/employees", employeesRouter(new EmployeeRepository(pool)));
+  app.use("/auth", authRouter(pool, { jwtSecret: options.jwtSecret }));
+  app.use(
+    "/employees",
+    authenticate(pool, options.jwtSecret),
+    employeesRouter(
+      new EmployeeRepository(pool, options.defaultEmployeePassword),
+    ),
+  );
 
   app.use((_req, res) => {
     res.status(404).json({ message: "Route not found" });

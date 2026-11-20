@@ -6,8 +6,16 @@ CREATE TABLE IF NOT EXISTS employees (
   name       VARCHAR(120) NOT NULL,
   email      VARCHAR(255) NOT NULL,
   role       VARCHAR(100) NOT NULL,
+  manager_id INTEGER REFERENCES employees (id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
+
+-- Existing databases created before the hierarchy column need it added.
+ALTER TABLE employees
+  ADD COLUMN IF NOT EXISTS manager_id INTEGER REFERENCES employees (id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS employees_manager_id_idx
+  ON employees (manager_id);
 
 -- Emails are unique regardless of casing.
 CREATE UNIQUE INDEX IF NOT EXISTS employees_email_lower_idx

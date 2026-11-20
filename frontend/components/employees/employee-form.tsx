@@ -5,11 +5,35 @@ import { Loader2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { MutationResult } from "@/hooks/use-employee-mutations";
-import type { EmployeeInput } from "@/types/employee";
+import type {
+  AccessRole,
+  EmployeeInput,
+  EmployeeName,
+} from "@/types/employee";
 
-const EMPTY_VALUES: EmployeeInput = { name: "", email: "", role: "" };
+const EMPTY_VALUES: EmployeeInput = {
+  name: "",
+  email: "",
+  role: "",
+  managerId: null,
+  accessRole: "employee",
+};
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const NO_MANAGER = "none";
+
+const ACCESS_ROLE_OPTIONS: { value: AccessRole; label: string }[] = [
+  { value: "employee", label: "Employee — view the directory" },
+  { value: "manager", label: "Manager — manage direct reports" },
+  { value: "admin", label: "Admin — manage everyone" },
+];
 
 interface EmployeeFormProps {
   initialValues?: EmployeeInput;
@@ -17,6 +41,11 @@ interface EmployeeFormProps {
   isSubmitting: boolean;
   onSubmit: (values: EmployeeInput) => Promise<MutationResult>;
   onCancel?: () => void;
+  managerOptions?: EmployeeName[];
+  canChooseAccessRole?: boolean;
+  lockManager?: boolean;
+  excludeEmployeeId?: number;
+  showPasswordHint?: boolean;
 }
 
 export function EmployeeForm({
@@ -25,13 +54,21 @@ export function EmployeeForm({
   isSubmitting,
   onSubmit,
   onCancel,
+  managerOptions = [],
+  canChooseAccessRole = false,
+  lockManager = false,
+  excludeEmployeeId,
+  showPasswordHint = false,
 }: EmployeeFormProps) {
   const formId = useId();
   const [values, setValues] = useState<EmployeeInput>(initialValues);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
 
-  function setField(field: keyof EmployeeInput, value: string) {
+  function setField<K extends keyof EmployeeInput>(
+    field: K,
+    value: EmployeeInput[K],
+  ) {
     setValues((previous) => ({ ...previous, [field]: value }));
     setErrors((previous) => {
       if (!previous[field]) return previous;
@@ -69,6 +106,8 @@ export function EmployeeForm({
       name: values.name.trim(),
       email: values.email.trim(),
       role: values.role.trim(),
+      managerId: values.managerId,
+      accessRole: values.accessRole ?? "employee",
     });
 
     if (!result.success) {
@@ -87,6 +126,10 @@ export function EmployeeForm({
       }
     }
   }
+
+  const visibleManagers = managerOptions.filter(
+    (manager) => manager.id !== excludeEmployeeId,
+  );
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
@@ -147,6 +190,86 @@ export function EmployeeForm({
           </p>
         ) : null}
       </div>
+
+      <div className="flex flex-col gap-2">
+        <Label htmlFor={`${formId}-manager`}>Reports to</Label>
+        <Select
+          value={
+            values.managerId === null ? NO_MANAGER : String(values.managerId)
+          }
+          onValueChange={(value) =>
+            setField(
+              "managerId",
+              value === NO_MANAGER ? null : Number(value),
+            )
+          }
+          disabled={isSubmitting || lockManager}
+        >
+          <SelectTrigger
+            id={`${formId}-manager`}
+            className="w-full"
+            aria-invalid={Boolean(errors.managerId)}
+          >
+            <SelectValue placeholder="No manager" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NO_MANAGER}>No manager</SelectItem>
+            {visibleManagers.map((manager) => (
+              <SelectItem key={manager.id} value={String(manager.id)}>
+                {manager.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {lockManager ? (
+          <p className="text-xs text-muted-foreground">
+            {showPasswordHint
+              ? "New employees report to you."
+              : "You cannot change who this employee reports to."}
+          </p>
+        ) : null}
+        {errors.managerId ? (
+          <p className="text-xs text-destructive">{errors.managerId}</p>
+        ) : null}
+      </div>
+
+      {canChooseAccessRole ? (
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={`${formId}-access-role`}>Access level</Label>
+          <Select
+            value={values.accessRole ?? "employee"}
+            onValueChange={(value) =>
+              setField("accessRole", value as AccessRole)
+            }
+            disabled={isSubmitting}
+          >
+            <SelectTrigger
+              id={`${formId}-access-role`}
+              className="w-full"
+              aria-invalid={Boolean(errors.accessRole)}
+            >
+              <SelectValue placeholder="Employee" />
+            </SelectTrigger>
+            <SelectContent>
+              {ACCESS_ROLE_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {errors.accessRole ? (
+            <p className="text-xs text-destructive">{errors.accessRole}</p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {showPasswordHint ? (
+        <p className="rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
+          The employee signs in with this email and the default password{" "}
+          <span className="font-medium text-foreground">Majdoor-hu-mai</span>.
+        </p>
+      ) : null}
 
       {formError ? (
         <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">

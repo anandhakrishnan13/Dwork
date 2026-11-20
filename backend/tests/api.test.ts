@@ -7,17 +7,30 @@ import type { Pool } from "pg";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
-import { seedSuperAdmin } from "../src/auth/seed.js";
+import { ensureEmployeeAccounts, seedSuperAdmin } from "../src/auth/seed.js";
 import { loadConfig } from "../src/config.js";
 import { createPool } from "../src/db/pool.js";
 
 const PORT = 55432;
 const CONNECTION_STRING = `postgresql://postgres:postgres@localhost:${PORT}/employees_test`;
+const ADMIN_EMAIL = "admin@test.local";
+const ADMIN_PASSWORD = "test-admin-password";
+const DEFAULT_EMPLOYEE_PASSWORD = "Majdoor-hu-mai";
 
 let postgres: EmbeddedPostgres;
 let pool: Pool;
 let app: ReturnType<typeof createApp>;
 let databaseDir: string;
+let adminToken = "";
+
+function authHeader() {
+  return { Authorization: `Bearer ${adminToken}` };
+}
+
+const get = (path: string) => request(app).get(path).set(authHeader());
+const post = (path: string) => request(app).post(path).set(authHeader());
+const put = (path: string) => request(app).put(path).set(authHeader());
+const del = (path: string) => request(app).delete(path).set(authHeader());
 
 async function seed() {
   await pool.query(`
@@ -48,11 +61,27 @@ beforeAll(async () => {
   pool = createPool(CONNECTION_STRING, false);
   const schema = await readFile(new URL("../db/schema.sql", import.meta.url), "utf8");
   await pool.query(schema);
-  app = createApp(pool, { corsOrigins: ["http://localhost:3000"] });
+  app = createApp(pool, {
+    corsOrigins: ["http://localhost:3000"],
+    jwtSecret: "test-jwt-secret-that-is-long-enough",
+    defaultEmployeePassword: DEFAULT_EMPLOYEE_PASSWORD,
+  });
+
+  await seedSuperAdmin(pool, { email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
+  const login = await request(app)
+    .post("/auth/login")
+    .send({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
+
+  if (login.status !== 200) {
+    throw new Error(`Test admin login failed: ${JSON.stringify(login.body)}`);
+  }
+
+  adminToken = login.body.data.token;
 }, 120_000);
 
 beforeEach(async () => {
-  await pool.query("TRUNCATE employees RESTART IDENTITY CASCADE");
+  await pool.query("DELETE FROM employees");
+  await pool.query("ALTER SEQUENCE employees_id_seq RESTART WITH 1");
   await seed();
 });
 
@@ -72,7 +101,7 @@ describe("GET /health", () => {
 
 describe("GET /employees", () => {
   it("returns the first page with server-controlled pagination metadata", async () => {
-    const response = await request(app).get("/employees");
+    const response = await get("/employees");
 
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({
@@ -86,7 +115,7 @@ describe("GET /employees", () => {
   });
 
   it("returns the remainder on the last page", async () => {
-    const response = await request(app).get("/employees?page=2");
+    const response = await get("/employees?page=2");
 
     expect(response.status).toBe(200);
     expect(response.body.currentPage).toBe(2);
@@ -99,19 +128,19 @@ describe("GET /employees", () => {
   });
 
   it("ignores client-supplied page sizes", async () => {
-    const response = await request(app).get("/employees?limit=1&pageSize=1&perPage=1");
+    const response = await get("/employees?limit=1&pageSize=1&perPage=1");
     expect(response.body.data).toHaveLength(10);
     expect(response.body.pageSize).toBe(10);
   });
 
   it("falls back to page 1 for invalid pages", async () => {
-    const response = await request(app).get("/employees?page=abc");
+    const response = await get("/employees?page=abc");
     expect(response.body.currentPage).toBe(1);
     expect(response.body.data).toHaveLength(10);
   });
 
   it("returns an empty page past the end without breaking metadata", async () => {
-    const response = await request(app).get("/employees?page=99");
+    const response = await get("/employees?page=99");
     expect(response.status).toBe(200);
     expect(response.body.data).toEqual([]);
     expect(response.body.totalPages).toBe(2);
@@ -119,21 +148,21 @@ describe("GET /employees", () => {
   });
 
   it("searches name, email and role case-insensitively", async () => {
-    const byName = await request(app).get("/employees?search=employee%2012");
+    const byName = await get("/employees?search=employee%2012");
     expect(byName.body.totalRecords).toBe(1);
     expect(byName.body.data[0].email).toBe("employee12@example.com");
 
-    const byRole = await request(app).get("/employees?search=designer");
+    const byRole = await get("/employees?search=designer");
     expect(byRole.body.totalRecords).toBe(6);
 
-    const byEmail = await request(app).get("/employees?search=EMPLOYEE1@");
+    const byEmail = await get("/employees?search=EMPLOYEE1@");
     expect(byEmail.body.totalRecords).toBe(1);
   });
 });
 
 describe("GET /employees/names", () => {
   it("returns alphabetically sorted names for the combobox", async () => {
-    const response = await request(app).get("/employees/names");
+    const response = await get("/employees/names");
 
     expect(response.status).toBe(200);
     expect(response.body.data).toHaveLength(13);
@@ -141,7 +170,7 @@ describe("GET /employees/names", () => {
   });
 
   it("filters names by search term", async () => {
-    const response = await request(app).get("/employees/names?search=Employee%201");
+    const response = await get("/employees/names?search=Employee%201");
     expect(response.body.data.map((employee: { name: string }) => employee.name)).toEqual([
       "Employee 10",
       "Employee 11",
@@ -153,7 +182,7 @@ describe("GET /employees/names", () => {
 
 describe("POST /employees", () => {
   it("creates an employee and normalizes the email", async () => {
-    const response = await request(app).post("/employees").send({
+    const response = await post("/employees").send({
       name: "  Ada Lovelace  ",
       email: "  ADA@Example.COM ",
       role: " Mathematician ",
@@ -169,7 +198,7 @@ describe("POST /employees", () => {
   });
 
   it("rejects invalid payloads with field-level errors", async () => {
-    const response = await request(app).post("/employees").send({
+    const response = await post("/employees").send({
       name: "A",
       email: "not-an-email",
       role: "",
@@ -183,7 +212,7 @@ describe("POST /employees", () => {
   });
 
   it("rejects unknown fields", async () => {
-    const response = await request(app).post("/employees").send({
+    const response = await post("/employees").send({
       name: "Grace Hopper",
       email: "grace@example.com",
       role: "Admiral",
@@ -194,13 +223,13 @@ describe("POST /employees", () => {
   });
 
   it("rejects duplicate emails regardless of casing", async () => {
-    await request(app).post("/employees").send({
+    await post("/employees").send({
       name: "First Person",
       email: "duplicate@example.com",
       role: "Engineer",
     });
 
-    const response = await request(app).post("/employees").send({
+    const response = await post("/employees").send({
       name: "Second Person",
       email: "DUPLICATE@example.com",
       role: "Designer",
@@ -213,7 +242,7 @@ describe("POST /employees", () => {
 
 describe("PUT /employees/:id", () => {
   it("updates an existing employee", async () => {
-    const response = await request(app).put("/employees/1").send({
+    const response = await put("/employees/1").send({
       name: "Updated Name",
       email: "updated@example.com",
       role: "Staff Engineer",
@@ -229,7 +258,7 @@ describe("PUT /employees/:id", () => {
   });
 
   it("returns 404 for a missing employee", async () => {
-    const response = await request(app).put("/employees/9999").send({
+    const response = await put("/employees/9999").send({
       name: "Nobody Here",
       email: "nobody@example.com",
       role: "Ghost",
@@ -239,7 +268,7 @@ describe("PUT /employees/:id", () => {
   });
 
   it("returns 400 for a malformed id", async () => {
-    const response = await request(app).put("/employees/abc").send({
+    const response = await put("/employees/abc").send({
       name: "Nobody Here",
       email: "nobody@example.com",
       role: "Ghost",
@@ -249,7 +278,7 @@ describe("PUT /employees/:id", () => {
   });
 
   it("rejects an email that belongs to another employee", async () => {
-    const response = await request(app).put("/employees/1").send({
+    const response = await put("/employees/1").send({
       name: "Employee One",
       email: "employee2@example.com",
       role: "Engineer",
@@ -261,24 +290,276 @@ describe("PUT /employees/:id", () => {
 
 describe("DELETE /employees/:id", () => {
   it("deletes an employee and removes it from later reads", async () => {
-    const response = await request(app).delete("/employees/1");
+    const response = await del("/employees/1");
     expect(response.status).toBe(204);
 
-    const list = await request(app).get("/employees");
+    const list = await get("/employees");
     expect(list.body.totalRecords).toBe(12);
 
-    const secondDelete = await request(app).delete("/employees/1");
+    const secondDelete = await del("/employees/1");
     expect(secondDelete.status).toBe(404);
   });
 });
 
 describe("CORS", () => {
   it("allows the configured frontend origin", async () => {
-    const response = await request(app)
-      .get("/employees")
+    const response = await get("/employees")
       .set("Origin", "http://localhost:3000");
 
     expect(response.headers["access-control-allow-origin"]).toBe("http://localhost:3000");
+  });
+});
+
+describe("POST /auth/login", () => {
+  it("signs in the super admin and returns a token", async () => {
+    const response = await request(app)
+      .post("/auth/login")
+      .send({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.token).toEqual(expect.any(String));
+    expect(response.body.data.user).toMatchObject({
+      email: ADMIN_EMAIL,
+      role: "admin",
+      isSuperAdmin: true,
+      employeeId: null,
+    });
+  });
+
+  it("rejects a wrong password without revealing which field was wrong", async () => {
+    const response = await request(app)
+      .post("/auth/login")
+      .send({ email: ADMIN_EMAIL, password: "not-the-password" });
+
+    expect(response.status).toBe(401);
+    expect(response.body.message).toBe("Invalid email or password");
+  });
+
+  it("validates the login payload", async () => {
+    const response = await request(app)
+      .post("/auth/login")
+      .send({ email: "not-an-email", password: "" });
+
+    expect(response.status).toBe(400);
+    expect(response.body.errors.email).toBeDefined();
+    expect(response.body.errors.password).toBeDefined();
+  });
+});
+
+describe("authentication", () => {
+  it("rejects employee requests without a token", async () => {
+    const response = await request(app).get("/employees");
+    expect(response.status).toBe(401);
+  });
+
+  it("rejects a malformed token", async () => {
+    const response = await request(app)
+      .get("/employees")
+      .set("Authorization", "Bearer not-a-real-token");
+    expect(response.status).toBe(401);
+  });
+
+  it("returns the current user from /auth/me", async () => {
+    const response = await request(app)
+      .get("/auth/me")
+      .set("Authorization", `Bearer ${adminToken}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toMatchObject({
+      email: ADMIN_EMAIL,
+      role: "admin",
+      isSuperAdmin: true,
+    });
+  });
+});
+
+async function createAccount(
+  accessRole: "employee" | "manager" | "admin",
+  name: string,
+  email: string,
+) {
+  const response = await post("/employees").send({
+    name,
+    email,
+    role: "Engineer",
+    accessRole,
+  });
+
+  expect(response.status).toBe(201);
+  return response.body.data as { id: number; email: string; access_role: string };
+}
+
+async function loginAs(email: string): Promise<string> {
+  const response = await request(app)
+    .post("/auth/login")
+    .send({ email, password: DEFAULT_EMPLOYEE_PASSWORD });
+
+  expect(response.status).toBe(200);
+  return response.body.data.token;
+}
+
+describe("role-based access", () => {
+  it("lets an employee read the directory but not create or delete", async () => {
+    await createAccount("employee", "Erin Employee", "erin@example.com");
+    const token = await loginAs("erin@example.com");
+    const asEmployee = { Authorization: `Bearer ${token}` };
+
+    const list = await request(app).get("/employees").set(asEmployee);
+    expect(list.status).toBe(200);
+
+    const create = await request(app).post("/employees").set(asEmployee).send({
+      name: "Not Allowed",
+      email: "not-allowed@example.com",
+      role: "Engineer",
+    });
+    expect(create.status).toBe(403);
+
+    const remove = await request(app).delete("/employees/1").set(asEmployee);
+    expect(remove.status).toBe(403);
+  });
+
+  it("lets a manager create an employee as their direct report", async () => {
+    const manager = await createAccount("manager", "Mona Manager", "mona@example.com");
+    const token = await loginAs("mona@example.com");
+
+    const response = await request(app)
+      .post("/employees")
+      .set({ Authorization: `Bearer ${token}` })
+      .send({
+        name: "Ravi Report",
+        email: "ravi@example.com",
+        role: "Engineer",
+        accessRole: "admin",
+        managerId: null,
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.data).toMatchObject({
+      name: "Ravi Report",
+      manager_id: manager.id,
+      manager_name: "Mona Manager",
+      access_role: "employee",
+    });
+  });
+
+  it("lets a manager edit a direct report but not someone else", async () => {
+    const manager = await createAccount("manager", "Mona Manager", "mona@example.com");
+    const report = await createAccount("employee", "Ravi Report", "ravi@example.com");
+    await put(`/employees/${report.id}`).send({
+      name: "Ravi Report",
+      email: "ravi@example.com",
+      role: "Engineer",
+      managerId: manager.id,
+    });
+
+    const token = await loginAs("mona@example.com");
+    const asManager = { Authorization: `Bearer ${token}` };
+
+    const ownReport = await request(app)
+      .put(`/employees/${report.id}`)
+      .set(asManager)
+      .send({ name: "Ravi Updated", email: "ravi@example.com", role: "Senior Engineer" });
+    expect(ownReport.status).toBe(200);
+    expect(ownReport.body.data.name).toBe("Ravi Updated");
+
+    const outsider = await request(app)
+      .put("/employees/1")
+      .set(asManager)
+      .send({ name: "Employee One", email: "employee1@example.com", role: "Engineer" });
+    expect(outsider.status).toBe(403);
+  });
+
+  it("does not let a manager delete employees", async () => {
+    await createAccount("manager", "Mona Manager", "mona@example.com");
+    const token = await loginAs("mona@example.com");
+
+    const response = await request(app)
+      .delete("/employees/1")
+      .set({ Authorization: `Bearer ${token}` });
+
+    expect(response.status).toBe(403);
+  });
+});
+
+describe("employee hierarchy", () => {
+  it("stores the manager and returns their name in the directory", async () => {
+    const manager = await createAccount("manager", "Mona Manager", "mona@example.com");
+    const response = await post("/employees").send({
+      name: "Ravi Report",
+      email: "ravi@example.com",
+      role: "Engineer",
+      managerId: manager.id,
+    });
+
+    expect(response.status).toBe(201);
+    expect(response.body.data).toMatchObject({
+      manager_id: manager.id,
+      manager_name: "Mona Manager",
+    });
+
+    const list = await get("/employees?search=ravi@example.com");
+    expect(list.body.data[0].manager_name).toBe("Mona Manager");
+  });
+
+  it("rejects self-management and reporting loops", async () => {
+    const manager = await createAccount("manager", "Mona Manager", "mona@example.com");
+    const report = await post("/employees").send({
+      name: "Ravi Report",
+      email: "ravi@example.com",
+      role: "Engineer",
+      managerId: manager.id,
+    });
+
+    const self = await put(`/employees/${manager.id}`).send({
+      name: "Mona Manager",
+      email: "mona@example.com",
+      role: "Manager",
+      managerId: manager.id,
+    });
+    expect(self.status).toBe(400);
+    expect(self.body.errors.managerId).toBeDefined();
+
+    const loop = await put(`/employees/${manager.id}`).send({
+      name: "Mona Manager",
+      email: "mona@example.com",
+      role: "Manager",
+      managerId: report.body.data.id,
+    });
+    expect(loop.status).toBe(400);
+    expect(loop.body.errors.managerId).toBeDefined();
+  });
+});
+
+describe("employee login accounts", () => {
+  it("creates default-password accounts for employees that lack one", async () => {
+    const created = await ensureEmployeeAccounts(pool, DEFAULT_EMPLOYEE_PASSWORD);
+    expect(created).toBe(13);
+
+    const login = await request(app)
+      .post("/auth/login")
+      .send({ email: "employee1@example.com", password: DEFAULT_EMPLOYEE_PASSWORD });
+
+    expect(login.status).toBe(200);
+    expect(login.body.data.user).toMatchObject({
+      email: "employee1@example.com",
+      role: "employee",
+      employeeId: 1,
+    });
+  });
+
+  it("keeps the login email in sync when an employee is updated", async () => {
+    const employee = await createAccount("employee", "Erin Employee", "erin@example.com");
+    await put(`/employees/${employee.id}`).send({
+      name: "Erin Employee",
+      email: "erin.updated@example.com",
+      role: "Engineer",
+    });
+
+    const login = await request(app)
+      .post("/auth/login")
+      .send({ email: "erin.updated@example.com", password: DEFAULT_EMPLOYEE_PASSWORD });
+
+    expect(login.status).toBe(200);
   });
 });
 

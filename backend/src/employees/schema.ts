@@ -1,5 +1,8 @@
 import { z } from "zod";
+import type { AccessRole } from "../auth/types.js";
 import { ValidationError } from "../errors.js";
+
+export const accessRoleSchema = z.enum(["employee", "manager", "admin"]);
 
 export const employeeInputSchema = z
   .object({
@@ -19,10 +22,19 @@ export const employeeInputSchema = z
       .trim()
       .min(2, "Role must be at least 2 characters")
       .max(100, "Role must be at most 100 characters"),
+    managerId: z
+      .number({ error: "Manager must be a number" })
+      .int("Manager must be a whole number")
+      .positive("Manager must be positive")
+      .nullable()
+      .default(null),
+    accessRole: accessRoleSchema.optional(),
   })
   .strict();
 
-export type EmployeeInput = z.infer<typeof employeeInputSchema>;
+export type EmployeeInput = z.infer<typeof employeeInputSchema> & {
+  accessRole?: AccessRole;
+};
 
 export const idParamSchema = z.coerce
   .number({ error: "Employee id must be a number" })

@@ -10,18 +10,27 @@ metadata it receives.
 | -------- | ----------------------------------------------------------------- |
 | Frontend | Next.js 16 (App Router) · TypeScript · Tailwind CSS · shadcn/ui   |
 | Data     | Axios · Sonner toasts                                             |
+| Auth     | JWT bearer tokens · bcryptjs password hashing                     |
 | Backend  | Node.js · Express 5 · TypeScript · Zod                            |
 | Database | PostgreSQL (Supabase or any Postgres 14+)                         |
 | Tests    | Vitest · Supertest · embedded PostgreSQL                          |
 
 ## Features
 
+- Email/password sign-in with JWT sessions; passwords are stored as bcrypt hashes.
+- Role-based access: employees read the directory, managers manage their direct
+  reports, admins manage everyone. The environment-configured super admin is an
+  admin that is recreated on every start.
+- Employee hierarchy via a **Reports to** picker when creating/editing someone;
+  reporting loops are rejected by the API.
+- Add-employee modal creates a login account automatically with the default
+  password `Majdoor-hu-mai` (configurable).
 - Create, edit and delete employees with confirmation dialogs.
 - Paginated table driven entirely by backend metadata (`page`, `totalPages`,
   `totalRecords`); the client cannot choose a page size.
 - Search combobox populated with employee names, plus free-text search across
   name, email and role.
-- Toast feedback for fetch, create, update and delete outcomes.
+- Toast feedback for login, fetch, create, update and delete outcomes.
 - Loading skeletons, empty states, inline retry, keyboard-accessible dialogs.
 - Responsive layout (stacked on mobile, two columns on desktop).
 - Case-insensitive unique emails, field-level validation errors, 409/404 handling.
@@ -37,21 +46,23 @@ metadata it receives.
 │   ├── scripts/local-db.ts     # optional embedded Postgres for development
 │   ├── src/
 │   │   ├── app.ts              # Express app factory (CORS, helmet, errors)
+│   │   ├── auth/               # login, JWT middleware, password seeding
 │   │   ├── config.ts           # env validation
 │   │   ├── db/pool.ts          # pg pool, SSL for Supabase
 │   │   ├── employees/
 │   │   │   ├── repository.ts   # parameterized SQL, fixed PAGE_SIZE
-│   │   │   ├── routes.ts       # REST endpoints
+│   │   │   ├── routes.ts       # REST endpoints + role checks
 │   │   │   └── schema.ts       # Zod validation
 │   │   └── server.ts
-│   └── tests/api.test.ts       # 19 integration tests against real Postgres
+│   └── tests/api.test.ts       # 36 integration tests against real Postgres
 ├── frontend/
-│   ├── app/                    # App Router pages, layout, global styles
+│   ├── app/                    # App Router pages, layout, login page
 │   ├── components/
+│   │   ├── auth/               # session provider + route guard
 │   │   ├── employees/          # feature components
 │   │   └── ui/                 # shadcn/ui primitives
 │   ├── hooks/                  # data fetching + mutation hooks
-│   ├── lib/                    # Axios client, formatters, cn
+│   ├── lib/                    # Axios client, auth storage, formatters, cn
 │   └── types/                  # shared TypeScript types
 ```
 
@@ -107,10 +118,17 @@ Environment variables:
 | `CORS_ORIGIN`  | no       | Comma-separated allowed origins (default `http://localhost:3000`) |
 | `SUPER_ADMIN_EMAIL`    | no | Super admin login email (default `default@example.com`) |
 | `SUPER_ADMIN_PASSWORD` | no | Super admin password (default `kaam-chor-majdoor`)      |
+| `JWT_SECRET`           | no | Token signing secret (default is development-only; set a long random value in production) |
+| `DEFAULT_EMPLOYEE_PASSWORD` | no | Password for new employee accounts (default `Majdoor-hu-mai`) |
 
 On every start the API creates or refreshes the super admin account from these
-values and stores its password as a bcrypt hash. Change both credentials before
-deploying.
+values, stores its password as a bcrypt hash, and gives any employee without a
+login an account using the default employee password. Change the credentials and
+secret before deploying.
+
+Sign in at `/login` with the super admin credentials. Newly created employees can
+sign in with their work email and the default password. Passwords are never
+returned by the API.
 
 Health check: `GET http://localhost:4000/health`.
 
@@ -124,6 +142,18 @@ npm run dev               # http://localhost:3000
 ```
 
 `NEXT_PUBLIC_API_URL` must point at the API (default `http://localhost:4000`).
+The app starts on `/login`; the directory at `/` requires a valid session.
+
+### Role model
+
+| Role | Directory | Create | Edit | Delete | Access level picker |
+| ---- | --------- | ------ | ---- | ------ | ------------------- |
+| Employee | read/search | no | no | no | no |
+| Manager | read/search | yes (direct reports) | direct reports only | no | no |
+| Admin | read/search | yes | everyone | yes | yes |
+
+The super admin is an admin account with no linked employee record, so it cannot
+be deleted or demoted through the employee API.
 
 ## Run everything from the root
 
@@ -138,6 +168,22 @@ npm run build             # typecheck + production builds
 
 Base URL: `http://localhost:4000`
 
+All `/employees` endpoints require `Authorization: Bearer <token>`.
+
+### `POST /auth/login`
+
+```json
+{ "email": "default@example.com", "password": "kaam-chor-majdoor" }
+```
+
+Returns `{ "data": { "token": "...", "user": { ... } } }`. Invalid credentials
+return `401` with a generic message.
+
+### `GET /auth/me`
+
+Returns the signed-in user: `{ "data": { "id", "email", "role",
+"isSuperAdmin", "employeeId", "name" } }`.
+
 ### `GET /employees?page=1&search=ada`
 
 Page size is fixed at **10** server-side. `limit`/`pageSize` query parameters are
@@ -151,6 +197,9 @@ ignored.
       "name": "Ada Lovelace",
       "email": "ada@example.com",
       "role": "Mathematician",
+      "manager_id": 4,
+      "manager_name": "Grace Hopper",
+      "access_role": "employee",
       "created_at": "2026-11-20T13:00:00.000Z"
     }
   ],
@@ -173,22 +222,38 @@ Compact list for the search combobox (max 50, alphabetical).
 
 ### `POST /employees`
 
+Admin or manager only.
+
 ```json
-{ "name": "Ada Lovelace", "email": "ada@example.com", "role": "Mathematician" }
+{
+  "name": "Ada Lovelace",
+  "email": "ada@example.com",
+  "role": "Mathematician",
+  "managerId": 4,
+  "accessRole": "employee"
+}
 ```
 
+- `managerId` is optional (`null` for no manager) and must reference an existing
+  employee. Self-management and reporting loops are rejected with `400`.
+- `accessRole` is `employee`, `manager` or `admin`; it defaults to `employee`.
+  Only admins may choose it — manager-created employees are always employees.
+- A manager's new employee is forced to report to that manager.
+- The employee gets a login account with the default password.
 - `201` with `{ "data": { ...employee } }`
 - `400` `{ "message": "Validation failed", "errors": { "email": ["..."] } }`
 - `409` duplicate email (case-insensitive)
 
 ### `PUT /employees/{id}`
 
-Same body as create. `200` with the updated record, `404` if missing, `409` on a
-duplicate email.
+Same body as create. Admins may edit anyone and change `accessRole`; managers may
+edit only their direct reports (their manager and access role stay fixed). `200`
+with the updated record, `404` if missing, `409` on a duplicate email.
 
 ### `DELETE /employees/{id}`
 
-`204` on success, `404` if missing.
+Admin only. `204` on success, `404` if missing. Deleting an employee also removes
+their login account and clears them as anyone's manager.
 
 All errors use `{ "message": string, "errors"?: Record<string, string[]> }`.
 
@@ -200,14 +265,17 @@ npm test
 ```
 
 The suite boots an embedded PostgreSQL instance, applies `db/schema.sql`, and
-exercises validation, pagination metadata, client-supplied limit rejection,
-search, combobox names, create/update/delete, duplicate emails, 404s and CORS.
+exercises login, JWT authentication, role-based access, hierarchy validation,
+default employee accounts, validation, pagination metadata, client-supplied limit
+rejection, search, combobox names, create/update/delete, duplicate emails, 404s
+and CORS. 36 tests run in roughly 10 seconds.
 
 ## Deployment
 
 - **Database:** Supabase (already hosted).
 - **API:** deploy `backend/` to Render, Railway or Fly.io with `DATABASE_URL`,
-  `DB_SSL=true`, `CORS_ORIGIN=https://your-frontend.vercel.app`. Build with
+  `DB_SSL=true`, `CORS_ORIGIN=https://your-frontend.vercel.app`,
+  `JWT_SECRET=<long random value>` and changed super-admin credentials. Build with
   `npm run build`, start with `npm start`.
 - **Frontend:** deploy `frontend/` to Vercel with
   `NEXT_PUBLIC_API_URL=https://your-api.example.com`.
@@ -218,5 +286,10 @@ search, combobox names, create/update/delete, duplicate emails, 404s and CORS.
   call; page size is a server constant (`PAGE_SIZE = 10`).
 - Emails are unique on `LOWER(email)` so casing cannot create duplicates.
 - LIKE wildcards in search terms are escaped, so `%` and `_` are literal.
+- Passwords use bcrypt (cost 12). Login tokens are signed JWTs with an 8-hour
+  lifetime; the API reloads the user on each request so role changes apply
+  immediately.
 - `helmet`, strict JSON body limits, parameterized queries and Zod `.strict()`
   payloads keep the API surface small and safe.
+- Manager edits are scoped in the API, not just hidden in the UI. Deleting an
+  employee cascades to their login account via a foreign key.

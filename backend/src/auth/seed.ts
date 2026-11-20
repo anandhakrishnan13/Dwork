@@ -29,3 +29,27 @@ export async function seedSuperAdmin(
     [email.trim().toLowerCase(), passwordHash],
   );
 }
+
+/**
+ * Gives every employee without a login an account using the default password.
+ * This makes seeded/directly-imported employees usable without a separate step.
+ */
+export async function ensureEmployeeAccounts(
+  pool: Pool,
+  defaultPassword: string,
+): Promise<number> {
+  const passwordHash = await bcrypt.hash(defaultPassword, BCRYPT_ROUNDS);
+
+  const result = await pool.query(
+    `INSERT INTO users (email, password_hash, role, employee_id)
+     SELECT e.email, $1, 'employee', e.id
+     FROM employees e
+     WHERE NOT EXISTS (
+       SELECT 1 FROM users u WHERE u.employee_id = e.id
+     )
+     ON CONFLICT (LOWER(email)) DO NOTHING`,
+    [passwordHash],
+  );
+
+  return result.rowCount ?? 0;
+}

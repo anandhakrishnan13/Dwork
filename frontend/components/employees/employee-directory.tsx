@@ -23,12 +23,15 @@ import { EmployeeForm } from "@/components/employees/employee-form";
 import { EmployeeSearch } from "@/components/employees/employee-search";
 import { EmployeeTable } from "@/components/employees/employee-table";
 import { PaginationControls } from "@/components/employees/pagination-controls";
+import { useAuth } from "@/components/auth/auth-provider";
 import { useEmployeeMutations } from "@/hooks/use-employee-mutations";
+import { useEmployeeNames } from "@/hooks/use-employee-names";
 import { useEmployees } from "@/hooks/use-employees";
 import { employeeCount } from "@/lib/format";
 import type { Employee, EmployeeInput } from "@/types/employee";
 
 export function EmployeeDirectory() {
+  const { user } = useAuth();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
@@ -39,7 +42,33 @@ export function EmployeeDirectory() {
     page,
     search,
   });
+  const { names: managers } = useEmployeeNames("");
   const { pending, create, update, remove } = useEmployeeMutations();
+
+  // Keep the signed-in manager selectable even if they fall outside the first
+  // page of name suggestions.
+  const managerOptions =
+    user?.role === "manager" &&
+    user.employeeId !== null &&
+    !managers.some((manager) => manager.id === user.employeeId)
+      ? [
+          { id: user.employeeId, name: user.name, email: user.email },
+          ...managers,
+        ]
+      : managers;
+
+  const isAdmin = user?.role === "admin";
+  const canCreate = isAdmin || user?.role === "manager";
+  const canDelete = isAdmin;
+
+  function canEdit(employee: Employee): boolean {
+    if (isAdmin) return true;
+    return (
+      user?.role === "manager" &&
+      user.employeeId !== null &&
+      employee.manager_id === user.employeeId
+    );
+  }
 
   // If a deletion empties the last page, step back to a page that exists.
   useEffect(() => {
@@ -106,10 +135,12 @@ export function EmployeeDirectory() {
             <UsersIcon className="size-3.5" />
             {data ? employeeCount(data.totalRecords) : "Loading…"}
           </Badge>
-          <Button onClick={() => setCreating(true)}>
-            <PlusIcon />
-            Add employee
-          </Button>
+          {canCreate ? (
+            <Button onClick={() => setCreating(true)}>
+              <PlusIcon />
+              Add employee
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -145,6 +176,8 @@ export function EmployeeDirectory() {
             pendingDeleteId={
               pending === "delete" && deleting ? deleting.id : null
             }
+            canEdit={canEdit}
+            canDelete={canDelete}
             onEdit={setEditing}
             onDelete={setDeleting}
             onRetry={() => void reload()}
@@ -173,6 +206,17 @@ export function EmployeeDirectory() {
             isSubmitting={pending === "create"}
             onSubmit={handleCreate}
             onCancel={() => setCreating(false)}
+            managerOptions={managerOptions}
+            canChooseAccessRole={isAdmin}
+            lockManager={user?.role === "manager"}
+            showPasswordHint
+            initialValues={{
+              name: "",
+              email: "",
+              role: "",
+              managerId: user?.role === "manager" ? user.employeeId : null,
+              accessRole: "employee",
+            }}
           />
         </DialogContent>
       </Dialog>
@@ -197,11 +241,17 @@ export function EmployeeDirectory() {
                 name: editing.name,
                 email: editing.email,
                 role: editing.role,
+                managerId: editing.manager_id,
+                accessRole: editing.access_role ?? "employee",
               }}
               submitLabel="Save changes"
               isSubmitting={pending === "update"}
               onSubmit={(values) => handleUpdate(editing, values)}
               onCancel={() => setEditing(null)}
+              managerOptions={managerOptions}
+              canChooseAccessRole={isAdmin}
+              lockManager={!isAdmin}
+              excludeEmployeeId={editing.id}
             />
           ) : null}
         </DialogContent>

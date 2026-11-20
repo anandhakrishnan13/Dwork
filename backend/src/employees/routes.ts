@@ -1,5 +1,7 @@
 import { Router } from "express";
-import { NotFoundError } from "../errors.js";
+import { requireRole } from "../auth/middleware.js";
+import type { AccessRole } from "../auth/types.js";
+import { HttpError, NotFoundError } from "../errors.js";
 import { EmployeeRepository, PAGE_SIZE } from "./repository.js";
 import { parseEmployeeInput, parseId } from "./schema.js";
 
@@ -33,34 +35,70 @@ export function employeesRouter(repository: EmployeeRepository): Router {
     });
   });
 
-  // Lightweight source for the search combobox.
+  // Lightweight source for the search combobox and manager picker.
   router.get("/names", async (req, res) => {
     const search = parseSearch(req.query.search);
     const names = await repository.names(search);
     res.json({ data: names });
   });
 
-  // POST /employees
-  router.post("/", async (req, res) => {
-    const employee = await repository.create(parseEmployeeInput(req.body));
+  // POST /employees — managers create direct reports; admins choose the access role.
+  router.post("/", requireRole("admin", "manager"), async (req, res) => {
+    const auth = req.auth!;
+    const input = parseEmployeeInput(req.body);
+
+    let accessRole: AccessRole = input.accessRole ?? "employee";
+    let managerId = input.managerId;
+
+    if (auth.role === "manager") {
+      if (auth.employeeId === null) {
+        throw new HttpError(403, "Your account is not linked to an employee record");
+      }
+
+      accessRole = "employee";
+      managerId = auth.employeeId;
+    }
+
+    const employee = await repository.create({ ...input, managerId }, accessRole);
     res.status(201).json({ data: employee });
   });
 
-  // PUT /employees/:id
-  router.put("/:id", async (req, res) => {
-    const id = parseId(req.params.id);
-    const employee = await repository.update(id, parseEmployeeInput(req.body));
+  // PUT /employees/:id — managers may edit only their direct reports.
+  router.put("/:id", requireRole("admin", "manager"), async (req, res) => {
+    const auth = req.auth!;
+    const rawId = req.params.id;
+    const id = parseId(typeof rawId === "string" ? rawId : "");
+    const existing = await repository.findById(id);
 
-    if (!employee) {
+    if (!existing) {
       throw new NotFoundError("Employee not found");
     }
 
+    const input = parseEmployeeInput(req.body);
+
+    if (auth.role === "manager") {
+      if (auth.employeeId === null || existing.manager_id !== auth.employeeId) {
+        throw new HttpError(403, "Managers can only edit employees who report to them");
+      }
+
+      // Managers cannot move someone to another manager or change access roles.
+      const employee = await repository.update(id, {
+        ...input,
+        managerId: existing.manager_id,
+      });
+
+      res.json({ data: employee });
+      return;
+    }
+
+    const employee = await repository.update(id, input, input.accessRole);
     res.json({ data: employee });
   });
 
-  // DELETE /employees/:id
-  router.delete("/:id", async (req, res) => {
-    const id = parseId(req.params.id);
+  // DELETE /employees/:id — admins only.
+  router.delete("/:id", requireRole("admin"), async (req, res) => {
+    const rawId = req.params.id;
+    const id = parseId(typeof rawId === "string" ? rawId : "");
     const deleted = await repository.remove(id);
 
     if (!deleted) {
