@@ -28,7 +28,6 @@ const ensureReady: RequestHandler = (_req, _res, next) => {
 const app = createApp(
   pool,
   {
-    corsOrigins: config.corsOrigins,
     jwtSecret: config.jwtSecret,
     defaultEmployeePassword: config.defaultEmployeePassword,
     basePath: "/api",

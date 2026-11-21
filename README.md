@@ -150,7 +150,7 @@ Environment variables:
 | `DATABASE_URL` | yes      | PostgreSQL connection string                             |
 | `DB_SSL`       | no       | `true` for Supabase/hosted Postgres, `false` locally     |
 | `PORT`         | no       | API port (default `4000`)                                |
-| `CORS_ORIGIN`  | no       | Comma-separated allowed origins (default `http://localhost:3000`) |
+| `CORS_ORIGIN`  | no       | Comma-separated allowed origins (local dev only; unset on Vercel) |
 | `SUPER_ADMIN_EMAIL`    | no | Super admin login email (default `default@example.com`) |
 | `SUPER_ADMIN_PASSWORD` | no | Super admin password (default `kaam-chor-majdoor`)      |
 | `JWT_SECRET`           | no | Token signing secret (default is development-only; set a long random value in production) |

@@ -8,7 +8,7 @@ loadEnv({ path: new URL("../../.env", import.meta.url), quiet: true });
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   PORT: z.coerce.number().int().positive().default(4000),
-  CORS_ORIGIN: z.string().default("http://localhost:3000"),
+  CORS_ORIGIN: z.string().default(""),
   DB_SSL: z.enum(["true", "false"]).optional(),
   SUPER_ADMIN_EMAIL: z.string().trim().email().default("default@example.com"),
   SUPER_ADMIN_PASSWORD: z.string().min(8).default("kaam-chor-majdoor"),

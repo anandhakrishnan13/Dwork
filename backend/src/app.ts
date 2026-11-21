@@ -9,7 +9,7 @@ import { employeesRouter } from "./employees/routes.js";
 import { HttpError } from "./errors.js";
 
 export interface AppOptions {
-  corsOrigins: string[];
+  corsOrigins?: string[];
   jwtSecret: string;
   defaultEmployeePassword: string;
   /** Optional public prefix, for example "/api" when deployed behind Vercel. */
@@ -33,13 +33,15 @@ export function createApp(
 
   app.disable("x-powered-by");
   app.use(helmet());
-  app.use(
-    cors({
-      origin: options.corsOrigins,
-      methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization"],
-    }),
-  );
+  if (options.corsOrigins?.length) {
+    app.use(
+      cors({
+        origin: options.corsOrigins,
+        methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allowedHeaders: ["Content-Type", "Authorization"],
+      }),
+    );
+  }
   app.use(express.json({ limit: "100kb" }));
   for (const middleware of preMiddleware) app.use(middleware);
 
