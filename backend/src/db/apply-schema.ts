@@ -1,7 +1,19 @@
 import { readFile } from "node:fs/promises";
 import type { Pool } from "pg";
 
-const schemaFile = new URL("../../db/schema.sql", import.meta.url);
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+
+// Resolve relative to this module first, then the working directory, because
+// bundled serverless builds may move the compiled file.
+const candidates = [
+  new URL("../../db/schema.sql", import.meta.url).pathname,
+  resolve(process.cwd(), "db/schema.sql"),
+  resolve(process.cwd(), "backend/db/schema.sql"),
+];
+const schemaFile = {
+  pathname: candidates.find((path) => existsSync(path)) ?? candidates[0]!,
+};
 
 /**
  * Applies the idempotent database schema.
@@ -14,7 +26,7 @@ export async function applySchema(pool: Pool): Promise<void> {
   let schema: string;
 
   try {
-    schema = await readFile(schemaFile, "utf8");
+    schema = await readFile(schemaFile.pathname, "utf8");
   } catch {
     throw new Error(
       `Could not read the database schema at ${schemaFile.pathname}. ` +

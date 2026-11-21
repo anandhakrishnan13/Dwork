@@ -1,5 +1,5 @@
 import cors from "cors";
-import express, { type ErrorRequestHandler } from "express";
+import express, { type ErrorRequestHandler, type RequestHandler } from "express";
 import helmet from "helmet";
 import type { Pool } from "pg";
 import { authenticate } from "./auth/middleware.js";
@@ -23,7 +23,11 @@ function normalizeBasePath(basePath?: string): string {
   return withLeadingSlash.replace(/\/+$/, "");
 }
 
-export function createApp(pool: Pool, options: AppOptions) {
+export function createApp(
+  pool: Pool,
+  options: AppOptions,
+  preMiddleware: RequestHandler[] = [],
+) {
   const app = express();
   const basePath = normalizeBasePath(options.basePath);
 
@@ -37,6 +41,7 @@ export function createApp(pool: Pool, options: AppOptions) {
     }),
   );
   app.use(express.json({ limit: "100kb" }));
+  for (const middleware of preMiddleware) app.use(middleware);
 
   app.get(`${basePath}/health`, async (_req, res) => {
     await pool.query("SELECT 1");
