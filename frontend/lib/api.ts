@@ -13,7 +13,11 @@ export class ApiError extends Error {
 }
 
 export const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000",
+  baseURL:
+    process.env.NEXT_PUBLIC_API_URL ??
+    (process.env.NODE_ENV === "production"
+      ? "/api"
+      : "http://localhost:4000"),
   timeout: 15_000,
   headers: { "Content-Type": "application/json" },
 });

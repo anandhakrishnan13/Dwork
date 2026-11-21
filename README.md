@@ -40,6 +40,7 @@ metadata it receives.
 ```
 .
 ├── .env.example                # single shared env template for both apps
+├── vercel.json                 # Vercel Services: frontend + API routing
 ├── backend/
 │   ├── db/
 │   │   ├── schema.sql          # table + indexes (migration)
@@ -49,6 +50,7 @@ metadata it receives.
 │   │   └── local-db.ts          # optional embedded Postgres for development
 │   ├── src/
 │   │   ├── app.ts              # Express app factory (CORS, helmet, errors)
+│   │   ├── index.ts            # Vercel entrypoint, mounts the API at /api
 │   │   ├── auth/               # login, JWT middleware, password seeding
 │   │   ├── config.ts           # env validation
 │   │   ├── db/
@@ -58,8 +60,8 @@ metadata it receives.
 │   │   │   ├── repository.ts   # parameterized SQL, fixed PAGE_SIZE
 │   │   │   ├── routes.ts       # REST endpoints + role checks
 │   │   │   └── schema.ts       # Zod validation
-│   │   └── server.ts
-│   └── tests/                  # 37 integration tests against real Postgres
+│   │   └── server.ts           # local HTTP server + startup schema/account seed
+│   └── tests/                  # 39 integration tests against real Postgres
 ├── frontend/
 │   ├── app/                    # App Router pages, layout, login page
 │   ├── components/
@@ -84,6 +86,10 @@ Both apps load it automatically; you do not need `backend/.env` or
 `frontend/.env.local`. Environment variables already set in your shell take
 precedence over the file.
 
+On Vercel there is no root `.env`; add the same keys in **Project Settings →
+Environment Variables**. Set `NEXT_PUBLIC_API_URL=/api` there. `PORT` and
+`CORS_ORIGIN` are only needed for local development.
+
 ## 2. Database (Supabase)
 
 1. Create a project at [supabase.com](https://supabase.com).
@@ -91,10 +97,10 @@ precedence over the file.
    string → URI**. Prefer the **Session pooler** URI if your network needs IPv4;
    the direct database host may be IPv6-only. The pooler username looks like
    `postgres.<project-ref>` and uses port `5432`. Replace `[YOUR-PASSWORD]` with
-   the database password.
-3. That is it. On startup the API applies `backend/db/schema.sql` automatically
-   (it is idempotent), so a fresh database gets the `employees` and `users`
-   tables. You can also apply it yourself before starting:
+   the database password. For Vercel Functions, use the **transaction pooler**
+   on port `6543` instead.
+3. Apply the schema. The local server does this automatically on startup. For a
+   hosted database, including Vercel, apply it once yourself:
 
 ```bash
 cd backend
@@ -151,11 +157,12 @@ Environment variables:
 | `DEFAULT_EMPLOYEE_PASSWORD` | no | Password for new employee accounts (default `Majdoor-hu-mai`) |
 | `NEXT_PUBLIC_API_URL`  | no | Frontend API base URL (default `http://localhost:4000`)  |
 
-On every start the API applies the idempotent schema, then creates or refreshes
-the super admin account from these
-values, stores its password as a bcrypt hash, and gives any employee without a
-login an account using the default employee password. Change the credentials and
-secret before deploying.
+When you run the local server (`npm run dev`), it applies the idempotent schema,
+creates or refreshes the super admin account from these values, stores its
+password as a bcrypt hash, and gives any employee without a login an account
+using the default employee password. The Vercel entrypoint does not run this
+startup preparation; apply the schema once as described above. Change the
+credentials and secret before deploying.
 
 Sign in at `/login` with the super admin credentials. Newly created employees can
 sign in with their work email and the default password. Passwords are never
@@ -302,18 +309,54 @@ exercises login, JWT authentication, role-based access, hierarchy validation,
 default employee accounts, validation, pagination metadata, client-supplied limit
 rejection, search, combobox names, create/update/delete, duplicate emails, 404s
 and CORS. A separate test starts from an empty database and proves the startup
-schema migration creates both tables and can run twice. 37 tests run in roughly
-10 seconds.
+schema migration creates both tables and can run twice. The Vercel `/api` prefix
+is covered as well. 39 tests run in roughly 10 seconds.
 
-## Deployment
+## Deploy to Vercel (Services)
 
-- **Database:** Supabase (already hosted).
-- **API:** deploy `backend/` to Render, Railway or Fly.io with `DATABASE_URL`,
-  `DB_SSL=true`, `CORS_ORIGIN=https://your-frontend.vercel.app`,
-  `JWT_SECRET=<long random value>` and changed super-admin credentials. Build with
-  `npm run build`, start with `npm start`.
-- **Frontend:** deploy `frontend/` to Vercel with
-  `NEXT_PUBLIC_API_URL=https://your-api.example.com`.
+The root `vercel.json` deploys this repository as one Vercel project with two
+services:
+
+| Service    | Root       | Framework | Public path |
+| ---------- | ---------- | --------- | ----------- |
+| `backend`  | `backend/` | `express` | `/api/*`    |
+| `frontend` | `frontend/`| `nextjs`  | `/*`        |
+
+The backend is internal except for `/api/*`, which is exposed by the rewrite.
+The frontend is public at `/`. `backend/src/index.ts` is the Vercel entrypoint
+and mounts the Express routes under `/api`.
+
+No service bindings are declared. The only frontend-to-backend traffic is the
+browser calling the public `/api` rewrite; there is no server-side call from one
+service to the other.
+
+### Setup
+
+1. Import the repository into Vercel. Keep the project root at the repository
+   root so Vercel reads `vercel.json`.
+2. Add these environment variables in **Project Settings → Environment
+   Variables**:
+   - `DATABASE_URL` — Supabase **transaction pooler** URI on port `6543`
+   - `DB_SSL=true`
+   - `NEXT_PUBLIC_API_URL=/api`
+   - `JWT_SECRET` — a long random value
+   - `SUPER_ADMIN_EMAIL`
+   - `SUPER_ADMIN_PASSWORD`
+   - `DEFAULT_EMPLOYEE_PASSWORD`
+3. Apply the schema once to the production database:
+
+   ```bash
+   DATABASE_URL="<production-url>" DB_SSL=true npm run db:schema
+   ```
+
+   The current Supabase project already has the schema and super admin. For a
+   fresh database, run the local server once against it to create both, or seed
+   them before deploying.
+4. Deploy. Vercel builds `frontend/` and `backend/` independently and routes
+   requests using the rewrites above.
+5. For local multi-service testing with the same routing, run `vercel dev` from
+   the repository root. The normal `npm run dev` still runs the two apps on
+   separate local ports.
 
 ## Design notes
 

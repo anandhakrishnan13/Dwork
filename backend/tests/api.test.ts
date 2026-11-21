@@ -20,6 +20,7 @@ const DEFAULT_EMPLOYEE_PASSWORD = "Majdoor-hu-mai";
 let postgres: EmbeddedPostgres;
 let pool: Pool;
 let app: ReturnType<typeof createApp>;
+let prefixedApp: ReturnType<typeof createApp>;
 let databaseDir: string;
 let adminToken = "";
 
@@ -67,6 +68,13 @@ beforeAll(async () => {
     defaultEmployeePassword: DEFAULT_EMPLOYEE_PASSWORD,
   });
 
+  prefixedApp = createApp(pool, {
+    corsOrigins: ["http://localhost:3000"],
+    jwtSecret: "test-jwt-secret-that-is-long-enough",
+    defaultEmployeePassword: DEFAULT_EMPLOYEE_PASSWORD,
+    basePath: "/api",
+  });
+
   await seedSuperAdmin(pool, { email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
   const login = await request(app)
     .post("/auth/login")
@@ -96,6 +104,30 @@ describe("GET /health", () => {
     const response = await request(app).get("/health");
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ status: "ok" });
+  });
+});
+
+describe("Vercel /api prefix", () => {
+  it("serves the API under /api", async () => {
+    const health = await request(prefixedApp).get("/api/health");
+    expect(health.status).toBe(200);
+    expect(health.body).toEqual({ status: "ok" });
+
+    const login = await request(prefixedApp)
+      .post("/api/auth/login")
+      .send({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
+    expect(login.status).toBe(200);
+
+    const employees = await request(prefixedApp)
+      .get("/api/employees")
+      .set("Authorization", `Bearer ${login.body.data.token}`);
+    expect(employees.status).toBe(200);
+    expect(employees.body.totalRecords).toBe(13);
+  });
+
+  it("does not expose unprefixed routes", async () => {
+    const response = await request(prefixedApp).get("/health");
+    expect(response.status).toBe(404);
   });
 });
 

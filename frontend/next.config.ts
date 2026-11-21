@@ -6,7 +6,11 @@ loadEnv({ path: new URL("../.env", import.meta.url), quiet: true });
 
 const nextConfig: NextConfig = {
   env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000",
+    NEXT_PUBLIC_API_URL:
+      process.env.NEXT_PUBLIC_API_URL ??
+      (process.env.NODE_ENV === "production"
+        ? "/api"
+        : "http://localhost:4000"),
   },
   cacheComponents: true,
   partialPrefetching: true,

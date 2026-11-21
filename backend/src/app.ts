@@ -12,10 +12,20 @@ export interface AppOptions {
   corsOrigins: string[];
   jwtSecret: string;
   defaultEmployeePassword: string;
+  /** Optional public prefix, for example "/api" when deployed behind Vercel. */
+  basePath?: string;
+}
+
+function normalizeBasePath(basePath?: string): string {
+  if (!basePath || basePath === "/") return "";
+
+  const withLeadingSlash = basePath.startsWith("/") ? basePath : `/${basePath}`;
+  return withLeadingSlash.replace(/\/+$/, "");
 }
 
 export function createApp(pool: Pool, options: AppOptions) {
   const app = express();
+  const basePath = normalizeBasePath(options.basePath);
 
   app.disable("x-powered-by");
   app.use(helmet());
@@ -28,14 +38,17 @@ export function createApp(pool: Pool, options: AppOptions) {
   );
   app.use(express.json({ limit: "100kb" }));
 
-  app.get("/health", async (_req, res) => {
+  app.get(`${basePath}/health`, async (_req, res) => {
     await pool.query("SELECT 1");
     res.json({ status: "ok" });
   });
 
-  app.use("/auth", authRouter(pool, { jwtSecret: options.jwtSecret }));
   app.use(
-    "/employees",
+    `${basePath}/auth`,
+    authRouter(pool, { jwtSecret: options.jwtSecret }),
+  );
+  app.use(
+    `${basePath}/employees`,
     authenticate(pool, options.jwtSecret),
     employeesRouter(
       new EmployeeRepository(pool, options.defaultEmployeePassword),
